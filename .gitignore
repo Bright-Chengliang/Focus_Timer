@@ -26,3 +26,5 @@ temp_*.py
 # 操作系统文件
 .DS_Store
 Thumbs.db
+
+git_push_guide.md
