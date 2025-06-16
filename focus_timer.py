@@ -4,6 +4,7 @@ import threading
 import os
 import sys
 import msvcrt  # Windows下键盘输入检测
+import json  # 用于配置文件读写
 from datetime import datetime, timedelta
 import pygame  # 添加pygame库
 
@@ -17,6 +18,56 @@ def get_resource_path(relative_path):
         base_path = os.path.abspath(".")
     
     return os.path.join(base_path, relative_path)
+
+class ConfigManager:
+    """配置管理类，用于保存和加载自定义设置"""
+    
+    def __init__(self):
+        self.config_file = "focus_timer_configs.json"
+        self.configs = self.load_configs()
+    
+    def load_configs(self):
+        """加载已保存的配置"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            return {}
+        except Exception as e:
+            print(f"[WARNING] 加载配置文件失败: {e}")
+            return {}
+    
+    def save_configs(self):
+        """保存配置到文件"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.configs, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"[ERROR] 保存配置文件失败: {e}")
+            return False
+    
+    def save_config(self, name, settings):
+        """保存一个配置"""
+        # 添加保存时间戳
+        settings['saved_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.configs[name] = settings
+        return self.save_configs()
+    
+    def get_config(self, name):
+        """获取指定名称的配置"""
+        return self.configs.get(name)
+    
+    def list_configs(self):
+        """列出所有已保存的配置"""
+        return list(self.configs.keys())
+    
+    def delete_config(self, name):
+        """删除指定配置"""
+        if name in self.configs:
+            del self.configs[name]
+            return self.save_configs()
+        return False
 
 class FocusTimer:
     def __init__(self, mode="default", custom_settings=None):
@@ -413,7 +464,195 @@ def get_custom_settings():
         print("已取消，返回主菜单")
         return None
     
+    # 询问是否保存配置
+    save_config = input("\n是否保存此配置以便下次使用？(y/n，默认n): ").strip().lower()
+    if save_config == 'y' or save_config == 'yes':
+        config_manager = ConfigManager()
+        while True:
+            config_name = input("请输入配置名称: ").strip()
+            if not config_name:
+                print("[WARNING] 配置名称不能为空")
+                continue
+            
+            # 检查是否已存在同名配置
+            if config_name in config_manager.list_configs():
+                overwrite = input(f"配置 '{config_name}' 已存在，是否覆盖？(y/n): ").strip().lower()
+                if overwrite != 'y' and overwrite != 'yes':
+                    continue
+            
+            # 保存配置
+            if config_manager.save_config(config_name, custom_settings.copy()):
+                print(f"[SUCCESS] 配置 '{config_name}' 保存成功！")
+            else:
+                print(f"[ERROR] 配置 '{config_name}' 保存失败")
+            break
+    
     return custom_settings
+
+def show_custom_mode_menu():
+    """显示自定义模式菜单"""
+    config_manager = ConfigManager()
+    saved_configs = config_manager.list_configs()
+    
+    print("\n" + "="*60)
+    print(">>> 自定义模式选择 <<<")
+    print("="*60)
+    print("请选择操作：")
+    print("1. 创建新的自定义配置")
+    
+    if saved_configs:
+        print("2. 加载已保存的配置")
+        print("3. 管理已保存的配置")
+    
+    print("0. 返回主菜单")
+    print("="*60)
+    
+    while True:
+        try:
+            if saved_configs:
+                choice = input("\n请选择 (0-3): ").strip()
+                if choice in ["0", "1", "2", "3"]:
+                    return choice
+            else:
+                choice = input("\n请选择 (0-1): ").strip()
+                if choice in ["0", "1"]:
+                    return choice
+            
+            print("[ERROR] 无效选择，请重新输入")
+        except KeyboardInterrupt:
+            return "0"
+
+def load_saved_config():
+    """加载已保存的配置"""
+    config_manager = ConfigManager()
+    saved_configs = config_manager.list_configs()
+    
+    if not saved_configs:
+        print("\n[INFO] 暂无已保存的配置")
+        return None
+    
+    print("\n[SAVED CONFIGS] 已保存的配置:")
+    print("-" * 50)
+    for i, config_name in enumerate(saved_configs, 1):
+        config = config_manager.get_config(config_name)
+        saved_time = config.get('saved_time', '未知时间')
+        print(f"{i}. {config_name} (保存时间: {saved_time})")
+    
+    print("0. 返回上级菜单")
+    print("-" * 50)
+    
+    while True:
+        try:
+            choice = input(f"\n请选择配置 (0-{len(saved_configs)}): ").strip()
+            
+            if choice == "0":
+                return None
+            
+            try:
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(saved_configs):
+                    config_name = saved_configs[choice_idx]
+                    config = config_manager.get_config(config_name)
+                    
+                    # 显示配置详情
+                    print(f"\n[CONFIG] 配置 '{config_name}' 详情:")
+                    print(f"   专注循环总时长: {config['max_focus_time']} 分钟")
+                    print(f"   短休息时长: {config['short_rest_time']} 秒")
+                    print(f"   长休息时长: {config['long_rest_time']//60} 分钟")
+                    sounds = config.get('sounds', {})
+                    print(f"   工作开始音效: {sounds.get('work_start', 'work.mp3')}")
+                    print(f"   短休息音效: {sounds.get('short_rest', 'small_rest.mp3')}")
+                    print(f"   长休息音效: {sounds.get('long_rest', 'big_rest.mp3')}")
+                    print(f"   保存时间: {config.get('saved_time', '未知时间')}")
+                    
+                    confirm = input(f"\n确认加载配置 '{config_name}'？(y/n，默认y): ").strip().lower()
+                    if confirm != 'n' and confirm != 'no':
+                        print(f"[SUCCESS] 已加载配置 '{config_name}'")
+                        return config
+                    return None
+                else:
+                    print("[ERROR] 无效选择，请重新输入")
+            except ValueError:
+                print("[ERROR] 请输入有效数字")
+                
+        except KeyboardInterrupt:
+            return None
+
+def manage_saved_configs():
+    """管理已保存的配置"""
+    config_manager = ConfigManager()
+    saved_configs = config_manager.list_configs()
+    
+    if not saved_configs:
+        print("\n[INFO] 暂无已保存的配置")
+        time.sleep(1)
+        return
+    
+    while True:
+        print("\n[CONFIG MANAGEMENT] 配置管理")
+        print("-" * 40)
+        for i, config_name in enumerate(saved_configs, 1):
+            config = config_manager.get_config(config_name)
+            saved_time = config.get('saved_time', '未知时间')
+            print(f"{i}. {config_name} (保存时间: {saved_time})")
+        
+        print("0. 返回上级菜单")
+        print("-" * 40)
+        print("操作说明：输入数字查看详情，输入 'd数字' 删除配置（如：d1）")
+        
+        try:
+            choice = input(f"\n请选择操作 (0-{len(saved_configs)} 或 d1-d{len(saved_configs)}): ").strip().lower()
+            
+            if choice == "0":
+                break
+            
+            # 删除操作
+            if choice.startswith('d') and len(choice) > 1:
+                try:
+                    del_idx = int(choice[1:]) - 1
+                    if 0 <= del_idx < len(saved_configs):
+                        config_name = saved_configs[del_idx]
+                        confirm = input(f"确认删除配置 '{config_name}'？(y/n): ").strip().lower()
+                        if confirm == 'y' or confirm == 'yes':
+                            if config_manager.delete_config(config_name):
+                                print(f"[SUCCESS] 配置 '{config_name}' 已删除")
+                                saved_configs = config_manager.list_configs()
+                                if not saved_configs:
+                                    print("[INFO] 所有配置已删除，返回上级菜单")
+                                    break
+                            else:
+                                print(f"[ERROR] 删除配置 '{config_name}' 失败")
+                    else:
+                        print("[ERROR] 无效的配置编号")
+                except ValueError:
+                    print("[ERROR] 无效的删除命令格式")
+                continue
+            
+            # 查看详情操作
+            try:
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(saved_configs):
+                    config_name = saved_configs[choice_idx]
+                    config = config_manager.get_config(config_name)
+                    
+                    print(f"\n[CONFIG DETAILS] 配置 '{config_name}' 详情:")
+                    print(f"   专注循环总时长: {config['max_focus_time']} 分钟")
+                    print(f"   短休息时长: {config['short_rest_time']} 秒")
+                    print(f"   长休息时长: {config['long_rest_time']//60} 分钟")
+                    sounds = config.get('sounds', {})
+                    print(f"   工作开始音效: {sounds.get('work_start', 'work.mp3')}")
+                    print(f"   短休息音效: {sounds.get('short_rest', 'small_rest.mp3')}")
+                    print(f"   长休息音效: {sounds.get('long_rest', 'big_rest.mp3')}")
+                    print(f"   保存时间: {config.get('saved_time', '未知时间')}")
+                    
+                    input("\n按回车键继续...")
+                else:
+                    print("[ERROR] 无效选择，请重新输入")
+            except ValueError:
+                print("[ERROR] 请输入有效数字或删除命令")
+                
+        except KeyboardInterrupt:
+            break
 
 def main():
     while True:
@@ -441,14 +680,35 @@ def main():
                     break
             elif choice == "3":
                 # 自定义模式
-                custom_settings = get_custom_settings()
-                if custom_settings:
-                    timer = FocusTimer(mode="custom", custom_settings=custom_settings)
-                    timer.run()
-                    # 检查是否需要返回主菜单
-                    if not timer.should_return_to_menu:
+                while True:
+                    custom_choice = show_custom_mode_menu()
+                    
+                    if custom_choice == "0":
+                        # 返回主菜单
                         break
-                # 如果用户取消了自定义设置，继续显示菜单
+                    elif custom_choice == "1":
+                        # 创建新的自定义配置
+                        custom_settings = get_custom_settings()
+                        if custom_settings:
+                            timer = FocusTimer(mode="custom", custom_settings=custom_settings)
+                            timer.run()
+                            # 检查是否需要返回主菜单
+                            if not timer.should_return_to_menu:
+                                return  # 退出整个程序
+                        break  # 返回主菜单
+                    elif custom_choice == "2":
+                        # 加载已保存的配置
+                        loaded_config = load_saved_config()
+                        if loaded_config:
+                            timer = FocusTimer(mode="custom", custom_settings=loaded_config)
+                            timer.run()
+                            # 检查是否需要返回主菜单
+                            if not timer.should_return_to_menu:
+                                return  # 退出整个程序
+                        break  # 返回主菜单
+                    elif custom_choice == "3":
+                        # 管理已保存的配置
+                        manage_saved_configs()
             else:
                 print("[ERROR] 无效选择，请输入 0-3 之间的数字")
                 time.sleep(1)

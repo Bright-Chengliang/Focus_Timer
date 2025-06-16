@@ -13,6 +13,9 @@ dist/
 test_*.py
 temp_*.py
 
+# 用户配置文件
+focus_timer_configs.json
+
 # 批处理文件
 *.bat
 
