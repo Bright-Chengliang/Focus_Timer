@@ -5,6 +5,7 @@ import os
 import sys
 import msvcrt  # Windows下键盘输入检测
 import json  # 用于配置文件读写
+import numpy as np  # 用于正态分布采样
 from datetime import datetime, timedelta
 import pygame  # 添加pygame库
 
@@ -96,6 +97,11 @@ class FocusTimer:
             self.max_focus_time = 6  # 测试模式：6秒后长休息
             self.short_rest_time = 1  # 测试模式：1秒短休息
             self.long_rest_time = 2   # 测试模式：2秒长休息
+            self.min_focus_time = 1.0  # 测试模式：最小1秒
+            self.max_single_focus_time = 2.0  # 测试模式：最大2秒
+            self.focus_distribution = "uniform"  # 测试模式：均匀分布
+            self.focus_mean = 1.5  # 正态分布均值（如果使用正态分布）
+            self.focus_std = 0.3   # 正态分布标准差（如果使用正态分布）
             self.sounds = default_sounds
             print("[TEST] 测试模式启动 - 所有时间已缩短")
         elif mode == "custom" and custom_settings:
@@ -103,6 +109,13 @@ class FocusTimer:
             self.max_focus_time = custom_settings.get("max_focus_time", 90)
             self.short_rest_time = custom_settings.get("short_rest_time", 10)
             self.long_rest_time = custom_settings.get("long_rest_time", 20 * 60)
+            
+            # 自定义专注时间区间设置
+            self.min_focus_time = custom_settings.get("min_focus_time", 3.0)
+            self.max_single_focus_time = custom_settings.get("max_single_focus_time", 5.0)
+            self.focus_distribution = custom_settings.get("focus_distribution", "uniform")
+            self.focus_mean = custom_settings.get("focus_mean", 4.0)
+            self.focus_std = custom_settings.get("focus_std", 0.8)
             
             # 处理自定义音效路径
             custom_sounds = custom_settings.get("sounds", {})
@@ -126,6 +139,11 @@ class FocusTimer:
             self.max_focus_time = 90  # 正常模式：90分钟后长休息
             self.short_rest_time = 10  # 正常模式：10秒短休息
             self.long_rest_time = 20 * 60  # 正常模式：20分钟长休息
+            self.min_focus_time = 3.0  # 默认模式：最小3分钟
+            self.max_single_focus_time = 5.0  # 默认模式：最大5分钟
+            self.focus_distribution = "uniform"  # 默认模式：均匀分布
+            self.focus_mean = 4.0  # 正态分布均值
+            self.focus_std = 0.8   # 正态分布标准差
             self.sounds = default_sounds
             print("[DEFAULT] 默认模式启动")
 
@@ -164,13 +182,26 @@ class FocusTimer:
                 print("[BELL] 铃声响起！")
     
     def get_random_focus_time(self):
-        """获取随机专注时间"""
-        if self.mode == "test":
-            # 测试模式：1-2秒
-            return round(random.uniform(1.0, 2.0), 1)
-        else:
-            # 正常模式：3-5分钟
-            return round(random.uniform(3.0, 5.0), 1)
+        """获取随机专注时间（支持自定义区间和分布模式）"""
+        if self.focus_distribution == "normal":
+            # 正态分布采样
+            while True:
+                focus_time = np.random.normal(self.focus_mean, self.focus_std)
+                # 确保生成的时间在合理范围内
+                if self.min_focus_time <= focus_time <= self.max_single_focus_time:
+                    return round(focus_time, 1)
+                # 如果超出范围，重新采样（避免无限循环，最多尝试100次）
+                # 如果100次都失败，回退到均匀分布
+                for _ in range(100):
+                    focus_time = np.random.normal(self.focus_mean, self.focus_std)
+                    if self.min_focus_time <= focus_time <= self.max_single_focus_time:
+                        return round(focus_time, 1)
+                # 回退到均匀分布
+                break
+        
+        # 均匀分布采样（默认或回退方案）
+        focus_time = random.uniform(self.min_focus_time, self.max_single_focus_time)
+        return round(focus_time, 1)
     
     def print_time_info(self, message, remaining_time=None):
         """打印时间信息"""
@@ -435,6 +466,74 @@ def get_custom_settings():
         print("[WARNING] 输入无效，使用默认值20分钟")
         custom_settings["long_rest_time"] = 20 * 60
     
+    # 设置短专注时间区间
+    print("\n[FOCUS INTERVAL] 短专注时间区间设置")
+    print("提示：这里设置每次专注的随机时间范围")
+    
+    # 设置最小专注时间
+    try:
+        min_focus_input = input(f"设置最小专注时长（分钟，默认3）: ").strip()
+        if min_focus_input:
+            custom_settings["min_focus_time"] = float(min_focus_input)
+        else:
+            custom_settings["min_focus_time"] = 3.0
+    except ValueError:
+        print("[WARNING] 输入无效，使用默认值3分钟")
+        custom_settings["min_focus_time"] = 3.0
+    
+    # 设置最大专注时间
+    try:
+        max_focus_input = input(f"设置最大专注时长（分钟，默认5）: ").strip()
+        if max_focus_input:
+            custom_settings["max_single_focus_time"] = float(max_focus_input)
+        else:
+            custom_settings["max_single_focus_time"] = 5.0
+        
+        # 确保最大值大于最小值
+        if custom_settings["max_single_focus_time"] <= custom_settings["min_focus_time"]:
+            print("[WARNING] 最大专注时间必须大于最小专注时间，自动调整")
+            custom_settings["max_single_focus_time"] = custom_settings["min_focus_time"] + 1.0
+    except ValueError:
+        print("[WARNING] 输入无效，使用默认值5分钟")
+        custom_settings["max_single_focus_time"] = 5.0
+    
+    # 设置随机分布模式
+    print("\n[DISTRIBUTION] 随机分布模式设置")
+    print("1. 均匀分布 (uniform) - 在区间内随机均匀分布")
+    print("2. 正态分布 (normal) - 以均值为中心的正态分布")
+    
+    while True:
+        dist_choice = input("请选择分布模式 (1-2，默认1): ").strip()
+        if dist_choice == "" or dist_choice == "1":
+            custom_settings["focus_distribution"] = "uniform"
+            break
+        elif dist_choice == "2":
+            custom_settings["focus_distribution"] = "normal"
+            
+            # 如果选择正态分布，需要设置均值和标准差
+            try:
+                mean_input = input(f"设置均值（分钟，默认{(custom_settings['min_focus_time'] + custom_settings['max_single_focus_time'])/2:.1f}）: ").strip()
+                if mean_input:
+                    custom_settings["focus_mean"] = float(mean_input)
+                else:
+                    custom_settings["focus_mean"] = (custom_settings["min_focus_time"] + custom_settings["max_single_focus_time"]) / 2
+            except ValueError:
+                print("[WARNING] 输入无效，使用计算的默认均值")
+                custom_settings["focus_mean"] = (custom_settings["min_focus_time"] + custom_settings["max_single_focus_time"]) / 2
+            
+            try:
+                std_input = input(f"设置标准差（分钟，默认0.8）: ").strip()
+                if std_input:
+                    custom_settings["focus_std"] = float(std_input)
+                else:
+                    custom_settings["focus_std"] = 0.8
+            except ValueError:
+                print("[WARNING] 输入无效，使用默认标准差0.8")
+                custom_settings["focus_std"] = 0.8
+            break
+        else:
+            print("[ERROR] 无效选择，请输入 1 或 2")
+    
     # 设置音效文件路径
     print("\n[SOUND] 音效设置（输入音频文件路径，支持mp3/wav格式）")
     sounds = {}
@@ -455,6 +554,11 @@ def get_custom_settings():
     print(f"   专注循环总时长: {custom_settings['max_focus_time']} 分钟")
     print(f"   短休息时长: {custom_settings['short_rest_time']} 秒")
     print(f"   长休息时长: {custom_settings['long_rest_time']//60} 分钟")
+    print(f"   短专注时间区间: {custom_settings['min_focus_time']:.1f} - {custom_settings['max_single_focus_time']:.1f} 分钟")
+    print(f"   随机分布模式: {custom_settings['focus_distribution']}")
+    if custom_settings['focus_distribution'] == 'normal':
+        print(f"   正态分布均值: {custom_settings['focus_mean']:.1f} 分钟")
+        print(f"   正态分布标准差: {custom_settings['focus_std']:.1f} 分钟")
     print(f"   工作开始音效: {sounds['work_start']}")
     print(f"   短休息音效: {sounds['short_rest']}")
     print(f"   长休息音效: {sounds['long_rest']}")
@@ -559,6 +663,11 @@ def load_saved_config():
                     print(f"   专注循环总时长: {config['max_focus_time']} 分钟")
                     print(f"   短休息时长: {config['short_rest_time']} 秒")
                     print(f"   长休息时长: {config['long_rest_time']//60} 分钟")
+                    print(f"   短专注时间区间: {config.get('min_focus_time', 3.0):.1f} - {config.get('max_single_focus_time', 5.0):.1f} 分钟")
+                    print(f"   随机分布模式: {config.get('focus_distribution', 'uniform')}")
+                    if config.get('focus_distribution') == 'normal':
+                        print(f"   正态分布均值: {config.get('focus_mean', 4.0):.1f} 分钟")
+                        print(f"   正态分布标准差: {config.get('focus_std', 0.8):.1f} 分钟")
                     sounds = config.get('sounds', {})
                     print(f"   工作开始音效: {sounds.get('work_start', 'work.mp3')}")
                     print(f"   短休息音效: {sounds.get('short_rest', 'small_rest.mp3')}")
@@ -639,6 +748,11 @@ def manage_saved_configs():
                     print(f"   专注循环总时长: {config['max_focus_time']} 分钟")
                     print(f"   短休息时长: {config['short_rest_time']} 秒")
                     print(f"   长休息时长: {config['long_rest_time']//60} 分钟")
+                    print(f"   短专注时间区间: {config.get('min_focus_time', 3.0):.1f} - {config.get('max_single_focus_time', 5.0):.1f} 分钟")
+                    print(f"   随机分布模式: {config.get('focus_distribution', 'uniform')}")
+                    if config.get('focus_distribution') == 'normal':
+                        print(f"   正态分布均值: {config.get('focus_mean', 4.0):.1f} 分钟")
+                        print(f"   正态分布标准差: {config.get('focus_std', 0.8):.1f} 分钟")
                     sounds = config.get('sounds', {})
                     print(f"   工作开始音效: {sounds.get('work_start', 'work.mp3')}")
                     print(f"   短休息音效: {sounds.get('short_rest', 'small_rest.mp3')}")
